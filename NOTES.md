@@ -39,4 +39,8 @@ Sent only when something changes. Byte 0 is the report ID.
   `colour index << 2 | brightness 0-3`. Confirmed by test: writing `1 << 2 | 3` and `11 << 2 | 3`
   to pad 12 blinked the bottom-left pad red and blue. Each report sets every LED in it, so
   unlisted LEDs go dark. Sent with a HID Set Report (output) while NI's helper was running.
-- 0x80 (button LEDs) is still untested.
+- 0x80 (button LEDs): confirmed working on the iPad. White buttons take brightness 0-63; the
+  coloured ones (Group A-H, Sampling, wheel arrows) take `colour << 2 | brightness`, colour 17 = white.
+  The button numbering and LED positions in `Driver/MK3Driver.cpp` come from the
+  [MK3Kit](https://github.com/chaoyi-ai/MK3Kit) project; its button numbers matched this unit
+  for every button checked (Play, Shift, wheel push, Channel/MIDI).
