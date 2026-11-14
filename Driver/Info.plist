@@ -24,6 +24,38 @@
 	<string>Lets the pads, knobs and buttons of a Maschine MK3 work as a MIDI controller.</string>
 	<key>IOKitPersonalities</key>
 	<dict>
+		<key>MK3Display</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleIdentifierKernel</key>
+			<string>com.apple.kpi.iokit</string>
+			<key>IOClass</key>
+			<string>IOUserService</string>
+			<key>IOProviderClass</key>
+			<string>IOUSBHostInterface</string>
+			<key>IOUserClass</key>
+			<string>MK3Display</string>
+			<key>IOUserServerName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOUserMIDIDriverUserClientProperties</key>
+			<dict>
+				<key>IOClass</key>
+				<string>IOUserUserClient</string>
+				<key>IOUserClass</key>
+				<string>IOUserMIDIDriverUserClient</string>
+			</dict>
+			<key>IOUserServerOneProcess</key>
+			<true/>
+			<key>idVendor</key>
+			<integer>6092</integer>
+			<key>idProduct</key>
+			<integer>5632</integer>
+			<key>bInterfaceNumber</key>
+			<integer>5</integer>
+			<key>bConfigurationValue</key>
+			<integer>1</integer>
+		</dict>
 		<key>MK3Driver</key>
 		<dict>
 			<key>CFBundleIdentifier</key>
@@ -38,6 +70,8 @@
 			<string>MK3Driver</string>
 			<key>IOUserServerName</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>IOUserServerOneProcess</key>
+			<true/>
 			<key>idVendor</key>
 			<integer>6092</integer>
 			<key>idProduct</key>

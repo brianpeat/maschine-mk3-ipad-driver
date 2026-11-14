@@ -1,0 +1,35 @@
+//
+//  MK3Display.iig
+//  Owns the Maschine MK3's display interface (interface 5 of 17cc:1600): sends the frame
+//  buffers kept in Screen.cpp to the two screens, and publishes the "Maschine MK3 Mixer"
+//  MIDI port used in Mixer mode.
+//
+
+#ifndef MK3Display_h
+#define MK3Display_h
+
+#include <Availability.h>
+#include <DriverKit/IOService.iig>
+#include <DriverKit/OSAction.iig>
+#include <USBDriverKit/IOUSBHostPipe.iig>
+#include <MIDIDriverKit/IOUserMIDIDriver.iig>
+
+using namespace MIDIDriverKit;
+
+class MK3Display: public IOUserMIDIDriver
+{
+public:
+	virtual bool init() override;
+	virtual void free() override;
+
+	virtual kern_return_t Start(IOService* provider) override;
+	virtual kern_return_t Stop(IOService* provider) override;
+
+	virtual kern_return_t StartIO(OSArray* deviceList) override;
+	virtual kern_return_t StopIO() override;
+
+	virtual void WriteComplete(OSAction* action, IOReturn status, uint32_t actualByteCount,
+							   uint64_t completionTimestamp) TYPE(IOUSBHostPipe::CompleteAsyncIO);
+};
+
+#endif /* MK3Display_h */

@@ -16,6 +16,18 @@
 //                    (press the Mod or Pitch button to choose; the chosen one is lit brightly)
 //    buttons         notes 0-70 on channel 16, one per button (use MIDI learn); a button
 //                    brightens while held
+//
+//  Mixer mode (press the Mixer button to switch it on and off) turns the controller into a
+//  Mackie Control surface on a second port, "Maschine MK3 Mixer":
+//    knobs 1-8       the eight channel faders of the current bank
+//    big wheel       the master fader
+//    screens         channel names and fader levels sent by the app
+//    Play/Stop/Rec   transport; Restart = rewind
+//    arrows          bank left / right (with Shift: one channel left / right)
+//    screen buttons  select, solo or mute for each channel; press Select, Solo or Mute to
+//                    choose which
+//  The pads and the touch strip keep working on the Controls port.
+//
 //  MIDI received from apps:
 //    notes 36-51     light the matching pad (colour follows velocity); note off dims it
 //
@@ -29,6 +41,8 @@
 #include <MIDIDriverKit/MIDIDriverKit.h>
 
 #include "MK3Driver.h"
+#include "Screen.h"
+#include "MixerPort.h"
 
 #define LOG(fmt, ...) os_log(OS_LOG_DEFAULT, "MK3Driver: " fmt, ##__VA_ARGS__)
 
@@ -54,6 +68,29 @@ static const uint32_t kPitchButton     = 38;
 static const uint32_t kModButton       = 39;
 static const uint32_t kButtonBytes     = 9;      // report bytes 1-9; the rest are touch sensors
 static const uint32_t kWheelTouchIndex = 71;     // in byte 9, but a touch sensor, not a button
+
+// Buttons with a job in Mixer mode.
+static const uint32_t kShiftButton = 6, kSelectButton = 35, kSoloButton = 36, kMuteButton = 37;
+static const uint32_t kRestartButton = 41, kPlayButton = 45, kRecButton = 46, kStopButton = 47;
+static const uint32_t kArrowRightButton = 50, kMixerButton = 52, kArrowLeftButton = 59;
+
+// Mackie Control note numbers.
+static const uint8_t  kMcuSolo = 8, kMcuMute = 16, kMcuSelect = 24;
+static const uint8_t  kMcuBankLeft = 46, kMcuBankRight = 47, kMcuChannelLeft = 48, kMcuChannelRight = 49;
+static const uint8_t  kMcuRewind = 91, kMcuStop = 93, kMcuPlay = 94, kMcuRecord = 95;
+static const uint8_t  kMcuFaderTouch = 104;      // 104-111 channels, 112 master
+static const int32_t  kFaderMax = 16383;
+static const int32_t  kFaderPerKnobCount = 11;   // about one and a half turns for the full range
+static const int32_t  kFaderPerWheelClick = 164; // about 100 clicks for the full range
+
+// Optional: in Mixer mode the touch strip (relative: sliding moves the fader, touching does
+// not jump it) and the wheel also send the main fader as an ordinary controller on the
+// Controls port, for apps that ignore the Mackie Control master fader but can learn a
+// controller. Switched by the host app with controller 119 on channel 16 (value >= 64 = on);
+// the driver echoes the message back as confirmation. Off after every plug-in.
+static const uint8_t  kMainFaderCC        = 23;
+static const uint8_t  kSettingsCC         = 119;
+static const int32_t  kFaderPerStripUnit  = 14;  // a full-length swipe is about three quarters of the range
 
 // Pad LED report 0x81: 25 touch-strip LEDs, then 16 pad LEDs. Byte = colour << 2 | brightness.
 static const uint32_t kLedReportBytes  = 42;
@@ -141,7 +178,133 @@ struct MK3Driver_IVars
 	bool     stripTouched;
 	int32_t  stripLastSent;
 	int32_t  stripModLed;        // LED the Mod bar currently reaches
+
+	bool     mixerMode;
+	uint8_t  rowMode;            // what the screen buttons do: 0 select, 1 solo, 2 mute
+	uint8_t  knobTouch;          // report byte 10: bit 7 = knob 1 ... bit 0 = knob 8
+	int32_t  fader[9];           // 0-16383; 8 channels and the master
+	bool     hostLed[128];       // button lights as the app last set them (Mackie note numbers)
+	char     lcd[112];           // the app's two rows of 56 characters, 7 per channel
+	uint8_t  sysex[160];
+	uint32_t sysexCount;
+
+	bool     mainControl;        // touch strip and wheel send the main fader as a controller
+	int32_t  stripAnchor;        // last strip position while sliding in that mode, -1 = none
 };
+
+// ---------------------------------------------------------------------------
+// Screens: one column per knob (four on each screen) with its controller number, its
+// value, and a level bar.
+
+static const int kColumnWidth = 120;
+static const int kBarX = 40, kBarY = 100, kBarW = 40, kBarH = 160;
+
+static void NumberText(int value, char* out)
+{
+	char digits[12]; int n = 0;
+	if (value < 0) value = 0;
+	do { digits[n++] = (char)('0' + value % 10); value /= 10; } while (value > 0 && n < 11);
+	while (n > 0) *out++ = digits[--n];
+	*out = 0;
+}
+
+static void CentredText(int display, int columnX, int y, const char* text, uint16_t fg, int scale)
+{
+	const uint16_t black = Screen::RGB(0, 0, 0);
+	Screen::Fill(display, columnX, y, kColumnWidth, 16 * scale, black);
+	Screen::Text(display, columnX + (kColumnWidth - Screen::TextWidth(text, scale)) / 2, y, text, fg, black, scale);
+}
+
+static void DrawKnobValue(int knob, int value)
+{
+	const int display = knob / 4, x = (knob % 4) * kColumnWidth;
+	char text[12];
+	NumberText(value, text);
+	CentredText(display, x, 56, text, Screen::RGB(255, 255, 255), 2);
+
+	const int filled = value * (kBarH - 4) / 127;
+	Screen::Fill(display, x + kBarX + 2, kBarY + 2, kBarW - 4, kBarH - 4 - filled, Screen::RGB(24, 24, 28));
+	Screen::Fill(display, x + kBarX + 2, kBarY + kBarH - 2 - filled, kBarW - 4, filled, Screen::RGB(0, 170, 255));
+}
+
+static void DrawKnobColumn(int knob, int controller, int value)
+{
+	const int display = knob / 4, x = (knob % 4) * kColumnWidth;
+	const uint16_t grey = Screen::RGB(150, 150, 150);
+	char text[16] = "KNOB ";
+	NumberText(knob + 1, text + 5);
+	CentredText(display, x, 8, text, Screen::RGB(255, 255, 255), 1);
+	char cc[16] = "CC ";
+	NumberText(controller, cc + 3);
+	CentredText(display, x, 28, cc, grey, 1);
+
+	// Bar outline.
+	Screen::Fill(display, x + kBarX, kBarY, kBarW, kBarH, grey);
+	Screen::Fill(display, x + kBarX + 2, kBarY + 2, kBarW - 4, kBarH - 4, Screen::RGB(24, 24, 28));
+	DrawKnobValue(knob, value);
+}
+
+static void DrawMidiScreens(MK3Driver_IVars* ivars)
+{
+	Screen::Fill(0, 0, 0, Screen::kWidth, Screen::kHeight, Screen::RGB(0, 0, 0));
+	Screen::Fill(1, 0, 0, Screen::kWidth, Screen::kHeight, Screen::RGB(0, 0, 0));
+	for (int i = 0; i < 8; i++) DrawKnobColumn(i, kKnobFirstCC + i, ivars->knobValue[i]);
+	Screen::Flush();
+}
+
+// Mixer mode: a column per channel with the name and second line the app sends, and a fader
+// bar; the main fader runs along the bottom of the right screen, labelled MAIN.
+static const int kFaderX = 44, kFaderY = 64, kFaderW = 32, kFaderH = 176;
+static const int kMasterX = 56, kMasterY = 250, kMasterW = 416, kMasterH = 16;   // "MAIN" label sits to its left
+
+static void DrawMixerText(MK3Driver_IVars* ivars, int channel)
+{
+	const int display = channel / 4, x = (channel % 4) * kColumnWidth;
+	char name[8], second[8];
+	for (int i = 0; i < 7; i++)
+	{
+		const char a = ivars->lcd[channel * 7 + i], b = ivars->lcd[56 + channel * 7 + i];
+		name[i] = (a >= 32 && a <= 126) ? a : ' ';
+		second[i] = (b >= 32 && b <= 126) ? b : ' ';
+	}
+	name[7] = 0; second[7] = 0;
+	CentredText(display, x, 4, name, Screen::RGB(255, 255, 255), 2);
+	CentredText(display, x, 40, second, Screen::RGB(150, 150, 150), 1);
+}
+
+static void DrawMixerFader(MK3Driver_IVars* ivars, int channel)
+{
+	const int display = channel / 4, x = (channel % 4) * kColumnWidth;
+	const int filled = ivars->fader[channel] * (kFaderH - 4) / kFaderMax;
+	Screen::Fill(display, x + kFaderX + 2, kFaderY + 2, kFaderW - 4, kFaderH - 4 - filled, Screen::RGB(24, 24, 28));
+	Screen::Fill(display, x + kFaderX + 2, kFaderY + kFaderH - 2 - filled, kFaderW - 4, filled, Screen::RGB(0, 200, 90));
+}
+
+static void DrawMaster(MK3Driver_IVars* ivars)
+{
+	const int filled = ivars->fader[8] * (kMasterW - 4) / kFaderMax;
+	Screen::Fill(1, kMasterX + 2, kMasterY + 2, filled, kMasterH - 4, Screen::RGB(255, 160, 0));
+	Screen::Fill(1, kMasterX + 2 + filled, kMasterY + 2, kMasterW - 4 - filled, kMasterH - 4, Screen::RGB(24, 24, 28));
+}
+
+static void DrawMixerScreens(MK3Driver_IVars* ivars)
+{
+	const uint16_t black = Screen::RGB(0, 0, 0), grey = Screen::RGB(150, 150, 150);
+	Screen::Fill(0, 0, 0, Screen::kWidth, Screen::kHeight, black);
+	Screen::Fill(1, 0, 0, Screen::kWidth, Screen::kHeight, black);
+	for (int channel = 0; channel < 8; channel++)
+	{
+		const int display = channel / 4, x = (channel % 4) * kColumnWidth;
+		Screen::Fill(display, x + kFaderX, kFaderY, kFaderW, kFaderH, grey);
+		DrawMixerText(ivars, channel);
+		DrawMixerFader(ivars, channel);
+	}
+	Screen::Text(0, 8, 250, "MIXER MODE", grey, black, 1);
+	Screen::Text(1, 12, 250, "MAIN", Screen::RGB(255, 160, 0), black, 1);
+	Screen::Fill(1, kMasterX, kMasterY, kMasterW, kMasterH, grey);
+	DrawMaster(ivars);
+	Screen::Flush();
+}
 
 // ---------------------------------------------------------------------------
 // MIDI out to apps
@@ -151,6 +314,18 @@ static void SendMIDI(MK3Driver_IVars* ivars, uint8_t status, uint8_t d1, uint8_t
 	if (ivars->source.get() == nullptr) return;
 	IOUserMIDIUMPWord word = 0x20000000u | ((uint32_t)status << 16) | ((uint32_t)(d1 & 0x7F) << 8) | (d2 & 0x7F);
 	ivars->source->Send(&word, 1);
+}
+
+static void SendMixer(MK3Driver_IVars* ivars, uint8_t status, uint8_t d1, uint8_t d2)
+{
+	// The Mixer port is published by MK3Display; see MixerPort.h.
+	if (!ivars->stopping) MixerPort::Send(status, d1, d2);
+}
+
+static void SendFader(MK3Driver_IVars* ivars, int channel)
+{
+	const int32_t value = ivars->fader[channel];
+	SendMixer(ivars, (uint8_t)(0xE0 | channel), (uint8_t)(value & 0x7F), (uint8_t)(value >> 7));
 }
 
 // ---------------------------------------------------------------------------
@@ -195,17 +370,65 @@ static void SetPadLed(MK3Driver_IVars* ivars, uint32_t pad, uint8_t value)
 	FlushLeds(ivars);
 }
 
+// The Mackie note a screen button sends in Mixer mode, or -1 if the button is not one of them.
+static int ScreenButtonChannel(uint32_t button)
+{
+	if (button >= 64 && button <= 70) return (int)button - 64;
+	if (button == 7) return 7;
+	return -1;
+}
+
+static uint8_t RowBaseNote(MK3Driver_IVars* ivars)
+{
+	return ivars->rowMode == 1 ? kMcuSolo : ivars->rowMode == 2 ? kMcuMute : kMcuSelect;
+}
+
+// What a button's LED shows while the button is not held.
+static uint8_t ButtonRest(MK3Driver_IVars* ivars, uint32_t button)
+{
+	const uint8_t address = kButtonLed[button];
+	const uint8_t on = IsColourLed(address) ? kColourLedOn : kWhiteLedOn;
+	if (button == (ivars->stripPitchMode ? kPitchButton : kModButton)) return on;
+	if (ivars->mixerMode)
+	{
+		if (button == kMixerButton) return on;
+		if (button == kSelectButton) return ivars->rowMode == 0 ? on : RestValue(address);
+		if (button == kSoloButton) return ivars->rowMode == 1 ? on : RestValue(address);
+		if (button == kMuteButton) return ivars->rowMode == 2 ? on : RestValue(address);
+		if (button == kPlayButton) return ivars->hostLed[kMcuPlay] ? on : RestValue(address);
+		if (button == kStopButton) return ivars->hostLed[kMcuStop] ? on : RestValue(address);
+		if (button == kRecButton) return ivars->hostLed[kMcuRecord] ? on : RestValue(address);
+		const int channel = ScreenButtonChannel(button);
+		if (channel >= 0) return ivars->hostLed[RowBaseNote(ivars) + channel] ? on : 0;
+	}
+	return RestValue(address);
+}
+
 static void SetButtonLed(MK3Driver_IVars* ivars, uint32_t button, bool on)
 {
 	if (button >= kButtonBytes * 8) return;
 	const uint8_t address = kButtonLed[button];
 	if (address == 0 || address >= kButtonLedReportBytes) return;
-	uint8_t value = on ? (IsColourLed(address) ? kColourLedOn : kWhiteLedOn) : RestValue(address);
-	if (button == (ivars->stripPitchMode ? kPitchButton : kModButton)) value = kWhiteLedOn;
+	const uint8_t value = on ? (IsColourLed(address) ? kColourLedOn : kWhiteLedOn) : ButtonRest(ivars, button);
 	if (ivars->buttonLeds[address] == value) return;
 	ivars->buttonLeds[address] = value;
 	ivars->buttonLedsDirty = true;
 	FlushLeds(ivars);
+}
+
+// Recomputes every button LED, for when a mode or the app's button lights change.
+static void RefreshButtonLeds(MK3Driver_IVars* ivars)
+{
+	bool changed = false;
+	for (uint32_t button = 0; button < kButtonBytes * 8; button++)
+	{
+		const uint8_t address = kButtonLed[button];
+		if (address == 0 || address >= kButtonLedReportBytes) continue;
+		const bool down = (ivars->buttons[button / 8] & (1u << (button % 8))) != 0;
+		const uint8_t value = down ? (IsColourLed(address) ? kColourLedOn : kWhiteLedOn) : ButtonRest(ivars, button);
+		if (ivars->buttonLeds[address] != value) { ivars->buttonLeds[address] = value; changed = true; }
+	}
+	if (changed) { ivars->buttonLedsDirty = true; FlushLeds(ivars); }
 }
 
 static void RestorePadLed(MK3Driver_IVars* ivars, uint32_t pad)
@@ -326,8 +549,44 @@ static void SetStripMode(MK3Driver_IVars* ivars, bool pitch)
 	ShowStrip(ivars);
 }
 
+static void ShowStripLevel(MK3Driver_IVars* ivars, int32_t level)
+{
+	uint8_t next[kStripLedCount] = {};
+	const int32_t top = level * (int32_t)(kStripLedCount - 1) / kFaderMax;
+	for (int32_t i = 0; i <= top && i < (int32_t)kStripLedCount; i++) next[i] = kStripLedOn;
+	if (memcmp(ivars->leds + 1, next, kStripLedCount) == 0) return;
+	memcpy(ivars->leds + 1, next, kStripLedCount);
+	ivars->ledsDirty = true;
+	FlushLeds(ivars);
+}
+
+// Sets the main fader from the wheel or the touch strip.
+static void SetMainFader(MK3Driver_IVars* ivars, int32_t value)
+{
+	value = value < 0 ? 0 : (value > kFaderMax ? kFaderMax : value);
+	if (value == ivars->fader[8]) return;
+	ivars->fader[8] = value;
+	SendFader(ivars, 8);
+	if (ivars->mainControl) SendMIDI(ivars, 0xB0, kMainFaderCC, (uint8_t)(value >> 7));
+	DrawMaster(ivars);
+	Screen::Flush();
+	if (ivars->mixerMode && ivars->mainControl) ShowStripLevel(ivars, value);   // strip lights follow the wheel too
+}
+
 static void HandleStrip(MK3Driver_IVars* ivars, uint32_t raw)
 {
+	if (ivars->mixerMode && ivars->mainControl)
+	{
+		// Relative: only sliding moves the main fader, so a touch can never make it jump.
+		if (raw == 0 || raw >= 8192) { ivars->stripTouched = false; ivars->stripAnchor = -1; return; }
+		if (ivars->stripAnchor >= 0)
+			SetMainFader(ivars, ivars->fader[8] + ((int32_t)raw - ivars->stripAnchor) * kFaderPerStripUnit);
+		ivars->stripAnchor = (int32_t)raw;
+		ivars->stripTouched = true;
+		ShowStripLevel(ivars, ivars->fader[8]);
+		return;
+	}
+
 	if (raw == 0 || raw >= 8192)
 	{
 		if (!ivars->stripTouched) return;
@@ -368,6 +627,46 @@ static void HandleStrip(MK3Driver_IVars* ivars, uint32_t raw)
 	ShowStrip(ivars);
 }
 
+static void SetMixerMode(MK3Driver_IVars* ivars, bool on)
+{
+	ivars->mixerMode = on;
+	if (on) DrawMixerScreens(ivars); else DrawMidiScreens(ivars);
+	RefreshButtonLeds(ivars);
+}
+
+// Handles a button in Mixer mode. Returns true if the button was used for the mixer and
+// should not also be sent as a note on the Controls port.
+static bool HandleMixerButton(MK3Driver_IVars* ivars, uint32_t button, bool down)
+{
+	if (button == kSelectButton || button == kSoloButton || button == kMuteButton)
+	{
+		if (down)
+		{
+			ivars->rowMode = button == kSoloButton ? 1 : button == kMuteButton ? 2 : 0;
+			RefreshButtonLeds(ivars);
+		}
+		return true;
+	}
+
+	int note = -1;
+	const bool shift = (ivars->buttons[kShiftButton / 8] & (1u << (kShiftButton % 8))) != 0;
+	if (button == kPlayButton) note = kMcuPlay;
+	else if (button == kStopButton) note = kMcuStop;
+	else if (button == kRecButton) note = kMcuRecord;
+	else if (button == kRestartButton) note = kMcuRewind;
+	else if (button == kArrowLeftButton) note = shift ? kMcuChannelLeft : kMcuBankLeft;
+	else if (button == kArrowRightButton) note = shift ? kMcuChannelRight : kMcuBankRight;
+	else
+	{
+		const int channel = ScreenButtonChannel(button);
+		if (channel >= 0) note = RowBaseNote(ivars) + channel;
+	}
+	if (note < 0) return false;
+
+	SendMixer(ivars, 0x90, (uint8_t)note, down ? 127 : 0);   // Mackie Control: release = velocity 0
+	return true;
+}
+
 static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32_t length)
 {
 	if (length < 28) return;
@@ -379,9 +678,9 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 		for (uint32_t i = 0; i < 8; i++)
 		{
 			ivars->knobRaw[i] = (uint16_t)(report[12 + i * 2] | (report[13 + i * 2] << 8));
-			ivars->knobValue[i] = 64;
 		}
 		ivars->wheel = report[11] & 0x0F;
+		ivars->knobTouch = report[10];
 		ivars->haveControls = true;
 		return;
 	}
@@ -393,10 +692,25 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 		{
 			if (!(changed & (1u << bit))) continue;
 			const uint8_t note = (uint8_t)(byte * 8 + bit);
-			if (note == kWheelTouchIndex) continue;
 			const bool down = (now & (1u << bit)) != 0;
-			if (down) SendMIDI(ivars, 0x90 | kButtonChannel, note, 127);
-			else SendMIDI(ivars, 0x80 | kButtonChannel, note, 0);
+			if (note == kWheelTouchIndex)
+			{
+				// Touching the wheel = touching the master fader.
+				if (ivars->mixerMode) SendMixer(ivars, 0x90, kMcuFaderTouch + 8, down ? 127 : 0);
+				continue;
+			}
+			if (note == kMixerButton)
+			{
+				if (down) SetMixerMode(ivars, !ivars->mixerMode);
+				SetButtonLed(ivars, note, down);
+				continue;
+			}
+			const bool usedByMixer = ivars->mixerMode && HandleMixerButton(ivars, note, down);
+			if (!usedByMixer)
+			{
+				if (down) SendMIDI(ivars, 0x90 | kButtonChannel, note, 127);
+				else SendMIDI(ivars, 0x80 | kButtonChannel, note, 0);
+			}
 			SetButtonLed(ivars, note, down);   // a button brightens while it is held
 			if (down && note == kPitchButton) SetStripMode(ivars, true);
 			if (down && note == kModButton) SetStripMode(ivars, false);
@@ -411,8 +725,31 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 		if (steps > 8) steps -= 16;
 		if (steps < -8) steps += 16;
 		ivars->wheel = wheel;
-		for (; steps > 0; steps--) SendMIDI(ivars, 0xB0, kWheelCC, 65);
-		for (; steps < 0; steps++) SendMIDI(ivars, 0xB0, kWheelCC, 63);
+		if (ivars->mixerMode)
+		{
+			// The wheel is the main fader.
+			SetMainFader(ivars, ivars->fader[8] + steps * kFaderPerWheelClick);
+		}
+		else
+		{
+			for (; steps > 0; steps--) SendMIDI(ivars, 0xB0, kWheelCC, 65);
+			for (; steps < 0; steps++) SendMIDI(ivars, 0xB0, kWheelCC, 63);
+		}
+	}
+
+	// Knob touch sensors: in Mixer mode they tell the app a fader is being held.
+	if (length > 10 && report[10] != ivars->knobTouch)
+	{
+		const uint8_t changed = report[10] ^ ivars->knobTouch;
+		ivars->knobTouch = report[10];
+		if (ivars->mixerMode)
+		{
+			for (int channel = 0; channel < 8; channel++)
+			{
+				const uint8_t mask = (uint8_t)(0x80 >> channel);
+				if (changed & mask) SendMixer(ivars, 0x90, (uint8_t)(kMcuFaderTouch + channel), (ivars->knobTouch & mask) ? 127 : 0);
+			}
+		}
 	}
 
 	for (uint32_t i = 0; i < 8; i++)
@@ -423,6 +760,21 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 		if (delta > 500) delta -= 1000;
 		if (delta < -500) delta += 1000;
 		ivars->knobRaw[i] = raw;
+
+		if (ivars->mixerMode)
+		{
+			// The knob is this channel's fader.
+			int32_t value = ivars->fader[i] + delta * kFaderPerKnobCount;
+			value = value < 0 ? 0 : (value > kFaderMax ? kFaderMax : value);
+			if (value != ivars->fader[i])
+			{
+				ivars->fader[i] = value;
+				SendFader(ivars, (int)i);
+				DrawMixerFader(ivars, (int)i);
+				Screen::Flush();
+			}
+			continue;
+		}
 
 		ivars->knobRemainder[i] += delta;
 		const int32_t steps = ivars->knobRemainder[i] / kKnobCountsPerCC;
@@ -435,6 +787,8 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 		{
 			ivars->knobValue[i] = value;
 			SendMIDI(ivars, 0xB0, (uint8_t)(kKnobFirstCC + i), (uint8_t)value);
+			DrawKnobValue((int)i, value);
+			Screen::Flush();
 		}
 	}
 
@@ -459,6 +813,28 @@ static kern_return_t HandleUMP(MK3Driver_IVars* ivars, const IOUserMIDIUMPWord* 
 			const uint8_t status = (uint8_t)(word >> 16) & 0xF0;
 			const uint8_t note = (uint8_t)(word >> 8) & 0x7F;
 			const uint8_t velocity = (uint8_t)word & 0x7F;
+			if ((uint8_t)(word >> 16) == (0xB0 | kButtonChannel) && note == kSettingsCC)
+			{
+				// A setting from the host app; echo it back so the app can show it took effect.
+				ivars->mainControl = velocity >= 64;
+				ivars->stripAnchor = -1;
+				SendMIDI(ivars, 0xB0 | kButtonChannel, kSettingsCC, ivars->mainControl ? 127 : 0);
+			}
+			if ((uint8_t)(word >> 16) == 0xB0 && note == kMainFaderCC && ivars->mainControl)
+			{
+				// The app reporting the main fader's position (for example after it was moved
+				// on the mixer). Ignore echoes of what we just sent.
+				if (velocity != (uint8_t)(ivars->fader[8] >> 7))
+				{
+					ivars->fader[8] = ((int32_t)velocity << 7) | velocity;
+					if (ivars->mixerMode)
+					{
+						DrawMaster(ivars);
+						Screen::Flush();
+						ShowStripLevel(ivars, ivars->fader[8]);
+					}
+				}
+			}
 			const int pad = PadForNote(note);
 			if (pad >= 0 && (status == 0x90 || status == 0x80))
 			{
@@ -476,6 +852,84 @@ static kern_return_t HandleUMP(MK3Driver_IVars* ivars, const IOUserMIDIUMPWord* 
 		}
 		i += len;
 	}
+	return kIOReturnSuccess;
+}
+
+// ---------------------------------------------------------------------------
+// Mixer port in: fader positions, button lights and display text from the app
+
+// A complete system-exclusive message, without F0 and F7.
+// Mackie Control display text: 00 00 66 <14 or 15> 12 <offset 0-111> <characters...>
+static void HandleMixerSysex(MK3Driver_IVars* ivars)
+{
+	const uint8_t* m = ivars->sysex;
+	const uint32_t n = ivars->sysexCount;
+	if (n < 7 || m[0] != 0x00 || m[1] != 0x00 || m[2] != 0x66 || m[4] != 0x12) return;
+	uint32_t offset = m[5];
+	bool touched[8] = {};
+	for (uint32_t i = 6; i < n && offset < sizeof(ivars->lcd); i++, offset++)
+	{
+		ivars->lcd[offset] = (char)m[i];
+		touched[(offset % 56) / 7] = true;
+	}
+	if (!ivars->mixerMode) return;
+	for (int channel = 0; channel < 8; channel++) if (touched[channel]) DrawMixerText(ivars, channel);
+	Screen::Flush();
+}
+
+static kern_return_t HandleMixerUMP(MK3Driver_IVars* ivars, const IOUserMIDIUMPWord* words, size_t numWords)
+{
+	if (ivars->stopping) return kIOReturnSuccess;
+	bool ledsChanged = false, screenChanged = false;
+	size_t i = 0;
+	while (i < numWords)
+	{
+		const uint32_t word = words[i];
+		const uint32_t type = word >> 28;
+		const uint32_t len = (type <= 2 || type == 6 || type == 7) ? 1 : (type == 3 || type == 4 || (type >= 8 && type <= 10)) ? 2 : (type == 11 || type == 12) ? 3 : 4;
+		if (i + len > numWords) break;
+
+		if (type == 2)
+		{
+			const uint8_t status = (uint8_t)(word >> 16);
+			const uint8_t d1 = (uint8_t)(word >> 8) & 0x7F, d2 = (uint8_t)word & 0x7F;
+			if ((status & 0xF0) == 0xE0 && (status & 0x0F) <= 8)
+			{
+				const int channel = status & 0x0F;
+				const int32_t value = ((int32_t)d2 << 7) | d1;
+				if (value != ivars->fader[channel])
+				{
+					ivars->fader[channel] = value;
+					if (ivars->mixerMode)
+					{
+						if (channel == 8) DrawMaster(ivars); else DrawMixerFader(ivars, channel);
+						screenChanged = true;
+					}
+				}
+			}
+			else if ((status & 0xF0) == 0x90 || (status & 0xF0) == 0x80)
+			{
+				const bool on = (status & 0xF0) == 0x90 && d2 > 0;
+				if (ivars->hostLed[d1] != on) { ivars->hostLed[d1] = on; ledsChanged = true; }
+			}
+		}
+		else if (type == 3)
+		{
+			const uint32_t form = (word >> 20) & 0xF;
+			uint32_t count = (word >> 16) & 0xF;
+			if (count > 6) count = 6;
+			const uint32_t second = words[i + 1];
+			const uint8_t bytes[6] = { (uint8_t)(word >> 8), (uint8_t)word, (uint8_t)(second >> 24),
+									   (uint8_t)(second >> 16), (uint8_t)(second >> 8), (uint8_t)second };
+			if (form == 0 || form == 1) ivars->sysexCount = 0;
+			for (uint32_t k = 0; k < count && ivars->sysexCount < sizeof(ivars->sysex); k++)
+				ivars->sysex[ivars->sysexCount++] = bytes[k] & 0x7F;
+			if (form == 0 || form == 3) { HandleMixerSysex(ivars); ivars->sysexCount = 0; }
+		}
+		i += len;
+	}
+	if (screenChanged) Screen::Flush();
+	if (ledsChanged && ivars->mixerMode) RefreshButtonLeds(ivars);
 	return kIOReturnSuccess;
 }
 
@@ -516,6 +970,13 @@ kern_return_t IMPL(MK3Driver, Start)
 	ivars->logBudget = 20;
 	ivars->stripLastSent = -1;
 	ivars->stripModLed = -1;
+	ivars->stripAnchor = -1;
+	for (uint32_t i = 0; i < 8; i++) ivars->knobValue[i] = 64;
+	memset(ivars->lcd, ' ', sizeof(ivars->lcd));
+
+	// Draw the knob columns now; they reach the screens as soon as the display driver is up.
+	Screen::Init();
+	DrawMidiScreens(ivars);
 
 	ivars->interface = OSDynamicCast(IOUSBHostInterface, provider);
 	if (ivars->interface == nullptr) { LOG("provider is not a USB interface"); return kIOReturnNoDevice; }
@@ -592,6 +1053,10 @@ kern_return_t IMPL(MK3Driver, Start)
 	ivars->destination->SetIOBlock(^kern_return_t(IOUserMIDIUMPWord const* umpWords, size_t numWords) {
 		return HandleUMP(state, umpWords, numWords);
 	});
+	// Mixer port input arrives through MK3Display.
+	MixerPort::SetReceiver([](void* context, const uint32_t* words, size_t numWords) {
+		HandleMixerUMP((MK3Driver_IVars*)context, words, numWords);
+	}, state);
 
 	ret = RegisterService();
 	if (ret != kIOReturnSuccess) { LOG("RegisterService failed 0x%x", ret); return ret; }
@@ -624,6 +1089,7 @@ kern_return_t IMPL(MK3Driver, Stop)
 {
 	LOG("stopping");
 	ivars->stopping = true;
+	MixerPort::SetReceiver(nullptr, nullptr);
 	if (ivars->inPipe != nullptr) ivars->inPipe->Abort(0, kIOReturnAborted, this);
 	if (ivars->outPipe != nullptr) ivars->outPipe->Abort(0, kIOReturnAborted, this);
 	if (ivars->device.get() != nullptr)
@@ -670,6 +1136,7 @@ kern_return_t MK3Driver::StopIO()
 		auto offline = OSSharedPtr(OSNumber::withNumber((uint64_t)1, 32), OSNoRetain);
 		ivars->device->SetProperty(IOUserMIDIProperty::Offline, offline.get());
 		ivars->device->StopIO();
+
 	}
 	return super::StopIO();
 }

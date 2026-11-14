@@ -15,6 +15,19 @@ final class MIDILink: ObservableObject {
     @Published var log: [String] = []
     @Published var status = ""
 
+    /// Driver option: in Mixer mode the touch strip and wheel also send the main fader as a
+    /// plain controller (23, channel 1) that mixer apps can learn. The driver forgets it when
+    /// the Maschine is unplugged, so it is sent again every time the port appears.
+    @Published var mainFaderControl = UserDefaults.standard.bool(forKey: "mainFaderControl") {
+        didSet {
+            UserDefaults.standard.set(mainFaderControl, forKey: "mainFaderControl")
+            applySettings()
+        }
+    }
+    /// True once the driver has echoed the current setting back.
+    @Published var driverConfirmed = false
+    private var hadControls = false
+
     private var client = MIDIClientRef()
     private var inPort = MIDIPortRef()
     private var outPort = MIDIPortRef()
@@ -61,6 +74,17 @@ final class MIDILink: ObservableObject {
         }
         sources = names
         destinations = (0..<MIDIGetNumberOfDestinations()).map { MIDILink.name(MIDIGetDestination($0)) }
+
+        let hasControls = controlsConnected
+        if hasControls && !hadControls { applySettings() }
+        if !hasControls { driverConfirmed = false }
+        hadControls = hasControls
+    }
+
+    /// Sends the options to the driver: controller 119 on channel 16, 127 = on, 0 = off.
+    func applySettings() {
+        driverConfirmed = false
+        _ = send([0xBF, 119, mainFaderControl ? 127 : 0])
     }
 
     // MARK: Receiving
@@ -99,6 +123,9 @@ final class MIDILink: ObservableObject {
                     let d1 = UInt8((word >> 8) & 0x7F)
                     let d2 = UInt8(word & 0x7F)
                     let channel = (statusByte & 0x0F) + 1
+                    if statusByte == 0xBF && d1 == 119 {
+                        DispatchQueue.main.async { self.driverConfirmed = true }
+                    }
                     switch statusByte & 0xF0 {
                     case 0x90: text += d2 > 0 ? "  note on  \(d1)  velocity \(d2)  ch \(channel)" : "  note off \(d1)  ch \(channel)"
                     case 0x80: text += "  note off \(d1)  ch \(channel)"
@@ -158,10 +185,28 @@ struct ContentView: View {
                 if !link.status.isEmpty { Text(link.status).foregroundStyle(.secondary) }
 
                 Divider()
+                options
+                Divider()
                 midiCheck
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(32)
+        }
+    }
+
+    @ViewBuilder private var options: some View {
+        Text("Options").font(.title2).bold()
+        Toggle("In Mixer mode, the touch strip and big wheel control the main fader",
+               isOn: Binding(get: { link.mainFaderControl }, set: { link.mainFaderControl = $0 }))
+        Text("Slide along the strip to move the fader; touching it does not make it jump. The wheel moves it one click at a time. Both send MIDI controller 23 on the \"Maschine MK3 Controls\" port, which a mixer app can learn and assign to its main fader.")
+            .font(.footnote).foregroundStyle(.secondary)
+        if !link.controlsConnected {
+            Text("Maschine not connected. The setting is sent when it is plugged in while this app is open.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } else if link.driverConfirmed {
+            Text("Driver confirmed: \(link.mainFaderControl ? "on" : "off").").font(.footnote).foregroundStyle(.green)
+        } else {
+            Text("Waiting for the driver to confirm…").font(.footnote).foregroundStyle(.secondary)
         }
     }
 

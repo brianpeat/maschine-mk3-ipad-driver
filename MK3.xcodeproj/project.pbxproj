@@ -9,11 +9,15 @@
 /* Begin PBXBuildFile section */
 		0EADDEC0964FC55DC1D571C5 /* USBDriverKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B7BCCBC713943EBAA245C287 /* USBDriverKit.framework */; };
 		13036E088741C1E8EB8653B8 /* MK3App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DFD1E98BC8CAF7009DB0E3E /* MK3App.swift */; };
+		570055CA4306D1F2B61A893D /* Screen.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 277D2AF252F54ADE0B23E958 /* Screen.cpp */; };
 		6252D49271287ADF6863039B /* MK3Driver.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 952D6AAEAF24AB43AAB10E58 /* MK3Driver.cpp */; };
+		75CEDBC6DF49E357EE00DF8B /* MK3Display.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D637D69451E9BA147FEC2A39 /* MK3Display.cpp */; };
 		7D773C0F8A9A65CB1DB059BE /* DriverKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9E8C2B86193020825C446CC2 /* DriverKit.framework */; };
+		A8536593B7D8E1ADD6E7E216 /* MixerPort.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B8D37EEB8C92DEB42EA9EC58 /* MixerPort.cpp */; };
 		C348E5FCDE47D2A930030F22 /* MK3Driver.dext in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 0D20582E3373B2A3F0632BB7 /* MK3Driver.dext */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C8976140FB19E53E4393CA41 /* MIDIDriverKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 32C5F357FD0150468770ECC1 /* MIDIDriverKit.framework */; };
 		D31381C38CBB085F67D5FEF4 /* MK3Driver.iig in Sources */ = {isa = PBXBuildFile; fileRef = 4D2B47F7B74C1303221DC643 /* MK3Driver.iig */; };
+		F6B45CB31D58A48AC51EB47F /* MK3Display.iig in Sources */ = {isa = PBXBuildFile; fileRef = D5B78AC53AB9E0819E54C209 /* MK3Display.iig */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,16 +46,23 @@
 
 /* Begin PBXFileReference section */
 		0D20582E3373B2A3F0632BB7 /* MK3Driver.dext */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.driver-extension"; path = MK3Driver.dext; sourceTree = BUILT_PRODUCTS_DIR; };
+		201913AE1F95F2F68266F7A3 /* Screen.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Screen.h; sourceTree = "<group>"; };
+		277D2AF252F54ADE0B23E958 /* Screen.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Screen.cpp; sourceTree = "<group>"; };
 		32C5F357FD0150468770ECC1 /* MIDIDriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MIDIDriverKit.framework; path = System/Library/Frameworks/MIDIDriverKit.framework; sourceTree = SDKROOT; };
 		4D2B47F7B74C1303221DC643 /* MK3Driver.iig */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.iig; path = MK3Driver.iig; sourceTree = "<group>"; };
 		5DFD1E98BC8CAF7009DB0E3E /* MK3App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MK3App.swift; sourceTree = "<group>"; };
 		952D6AAEAF24AB43AAB10E58 /* MK3Driver.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = MK3Driver.cpp; sourceTree = "<group>"; };
 		9E8C2B86193020825C446CC2 /* DriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DriverKit.framework; path = System/Library/Frameworks/DriverKit.framework; sourceTree = SDKROOT; };
+		AE8E45DED4DE968490332B58 /* MixerPort.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MixerPort.h; sourceTree = "<group>"; };
 		AF144CD8CC25CF378A76E0F0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B7BCCBC713943EBAA245C287 /* USBDriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = USBDriverKit.framework; path = System/Library/Frameworks/USBDriverKit.framework; sourceTree = SDKROOT; };
+		B8D37EEB8C92DEB42EA9EC58 /* MixerPort.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = MixerPort.cpp; sourceTree = "<group>"; };
+		D5B78AC53AB9E0819E54C209 /* MK3Display.iig */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.iig; path = MK3Display.iig; sourceTree = "<group>"; };
+		D637D69451E9BA147FEC2A39 /* MK3Display.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = MK3Display.cpp; sourceTree = "<group>"; };
+		DC45570084AA0540C06232E8 /* Font8x16.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Font8x16.h; sourceTree = "<group>"; };
 		E34359124EF5572A345B0FCC /* MK3Driver.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MK3Driver.entitlements; sourceTree = "<group>"; };
 		FB807F154E4F5EC09150CC9F /* MK3.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MK3.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		"TEMP_AC08D570-DE31-4DCC-9CF6-CA5A7D614677" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		"TEMP_D561D1CB-289D-452B-9D49-51F1C4410889" /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -80,10 +91,17 @@
 		60F95092BBA47CB7575EA23B /* Driver */ = {
 			isa = PBXGroup;
 			children = (
+				DC45570084AA0540C06232E8 /* Font8x16.h */,
 				AF144CD8CC25CF378A76E0F0 /* Info.plist */,
+				B8D37EEB8C92DEB42EA9EC58 /* MixerPort.cpp */,
+				AE8E45DED4DE968490332B58 /* MixerPort.h */,
+				D637D69451E9BA147FEC2A39 /* MK3Display.cpp */,
+				D5B78AC53AB9E0819E54C209 /* MK3Display.iig */,
 				952D6AAEAF24AB43AAB10E58 /* MK3Driver.cpp */,
 				E34359124EF5572A345B0FCC /* MK3Driver.entitlements */,
 				4D2B47F7B74C1303221DC643 /* MK3Driver.iig */,
+				277D2AF252F54ADE0B23E958 /* Screen.cpp */,
+				201913AE1F95F2F68266F7A3 /* Screen.h */,
 			);
 			path = Driver;
 			sourceTree = "<group>";
@@ -116,10 +134,10 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		"TEMP_34BFEC6A-2DC9-47D9-BF94-FCB88D15B37A" /* MaschineMK3-iPad-Driver */ = {
+		"TEMP_1A97EC77-70FB-422A-850D-E84FF640DC5C" /* MaschineMK3-iPad-Driver */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_AC08D570-DE31-4DCC-9CF6-CA5A7D614677" /* Config.xcconfig */,
+				"TEMP_D561D1CB-289D-452B-9D49-51F1C4410889" /* Config.xcconfig */,
 			);
 			path = "MaschineMK3-iPad-Driver";
 			sourceTree = "<group>";
@@ -216,8 +234,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				75CEDBC6DF49E357EE00DF8B /* MK3Display.cpp in Sources */,
+				F6B45CB31D58A48AC51EB47F /* MK3Display.iig in Sources */,
 				6252D49271287ADF6863039B /* MK3Driver.cpp in Sources */,
 				D31381C38CBB085F67D5FEF4 /* MK3Driver.iig in Sources */,
+				A8536593B7D8E1ADD6E7E216 /* MixerPort.cpp in Sources */,
+				570055CA4306D1F2B61A893D /* Screen.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -234,7 +256,7 @@
 /* Begin XCBuildConfiguration section */
 		0ED4013F740A707009C53558 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_AC08D570-DE31-4DCC-9CF6-CA5A7D614677" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_D561D1CB-289D-452B-9D49-51F1C4410889" /* Config.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -299,7 +321,7 @@
 		};
 		216D50C26EC3C378989EF52C /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_AC08D570-DE31-4DCC-9CF6-CA5A7D614677" /* Config.xcconfig */;
+			baseConfigurationReference = "TEMP_D561D1CB-289D-452B-9D49-51F1C4410889" /* Config.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

@@ -48,3 +48,16 @@ Sent only when something changes. Byte 0 is the report ID.
   The button numbering and LED positions in `Driver/MK3Driver.cpp` come from the
   [MK3Kit](https://github.com/chaoyi-ai/MK3Kit) project; its button numbers matched this unit
   for every button checked (Play, Shift, wheel push, Channel/MIDI).
+
+## Screens (interface 5, bulk OUT 0x04)
+
+Two displays, 480 x 272 each, RGB565 with the high byte first. One bulk transfer per update:
+
+- 16-byte header: `84 00 <display 0 or 1> 60 00 00 00 00`, then x, y, width, height as 16-bit big-endian.
+- Command `00` followed by half the pixel count as 24-bit big-endian, then the pixels, row by row from the top-left.
+- `03 00 00 00` (show it) and `40 00 00 00` (end).
+
+Confirmed on this unit from the Mac with `tools/screentest`: display 0 is the left screen, the
+origin is top-left, and colours come out right. Format from MK3Kit. On a Mac, NI's background
+helpers (NIHostIntegrationAgent, NIHardwareAgent) hold this interface exclusively and must be
+quit first; they return when the Maschine is replugged.
