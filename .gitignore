@@ -1,0 +1,7 @@
+tools/hidlisten
+tools/padblink
+build/
+DerivedData/
+.DS_Store
+xcuserdata/
+Local.xcconfig
