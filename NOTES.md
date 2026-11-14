@@ -33,7 +33,7 @@ Sent only when something changes. Byte 0 is the report ID.
 - Byte 11: wheel position, a 4-bit counter that steps by one per click.
 - Bytes 12-27: the eight knobs, 16-bit little-endian each, counting 0 to 999 and wrapping.
 - Bytes 30-31: touch strip position, 16-bit little-endian, 0 = not touched, about 60 (left) to
-  960 (right). From MK3Kit; not yet confirmed on this unit.
+  960 (right). From MK3Kit; confirmed working on this unit.
 - Bytes 36-41: the three small volume knobs (from MK3Kit; not used here).
 
 ## HID output reports

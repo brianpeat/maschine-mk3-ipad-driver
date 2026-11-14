@@ -31,8 +31,8 @@ Lights:
 
 ## Status
 
-- Confirmed on one MK3 (firmware 1.45) and an M5 iPad Pro on iPadOS 26: pads, knobs, wheel, buttons, pad lights and button lights, and pads playing instruments in Logic Pro for iPad.
-- The touch strip code is new and has not been tested on hardware yet.
+- Confirmed on one MK3 (firmware 1.45) and an M5 iPad Pro on iPadOS 26: pads, knobs, wheel, buttons, touch strip, pad lights and button lights, with pads and the touch strip playing instruments in Logic Pro for iPad.
+- Installing a new build while the Maschine is connected once crashed the iPad's MIDI service (it restarts by itself). Unplug the Maschine before installing.
 - Not handled: the two screens, the three small volume knobs, and pad-light colours for anything beyond note on and off.
 - Buttons send notes, so in apps that listen to every MIDI channel they will also trigger sounds.
 - Play, Stop and Record cannot drive Logic Pro for iPad from here. Logic does not appear to take transport commands over MIDI, and iPadOS does not support the kind of driver that could act as a keyboard. Apps with MIDI learn for transport work.
