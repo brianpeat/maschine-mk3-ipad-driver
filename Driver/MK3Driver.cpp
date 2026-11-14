@@ -11,6 +11,9 @@
 //    pad pressure    polyphonic aftertouch on the pad's note
 //    knobs 1-8       controllers 14-21, 0-127
 //    big wheel       controller 22, relative: 65 = one click right, 63 = one click left
+//    touch strip     Mod mode (default): controller 1, keeps its value when you let go
+//                    Pitch mode: pitch bend, returns to centre when you let go
+//                    (press the Mod or Pitch button to choose; the chosen one is lit brightly)
 //    buttons         notes 0-70 on channel 16, one per button (use MIDI learn); a button
 //                    brightens while held
 //  MIDI received from apps:
@@ -40,6 +43,15 @@ static const uint8_t  kKnobFirstCC     = 14;
 static const uint8_t  kWheelCC         = 22;
 static const int32_t  kKnobCountsPerCC = 4;      // knob reports 1000 counts per turn
 static const uint8_t  kButtonChannel   = 15;     // channel 16
+
+// Touch strip: report 0x01 bytes 30-31, 0 = not touched, about 60 (left) to 960 (right).
+static const uint32_t kStripMin        = 60;
+static const uint32_t kStripMax        = 960;
+static const uint32_t kStripLedCount   = 25;     // first 25 LEDs of report 0x81
+static const uint8_t  kStripLedOn      = (11 << 2) | 3;
+static const uint8_t  kStripLedDim     = (11 << 2) | 0;
+static const uint32_t kPitchButton     = 38;
+static const uint32_t kModButton       = 39;
 static const uint32_t kButtonBytes     = 9;      // report bytes 1-9; the rest are touch sensors
 static const uint32_t kWheelTouchIndex = 71;     // in byte 9, but a touch sensor, not a button
 
@@ -124,6 +136,11 @@ struct MK3Driver_IVars
 	int32_t  knobRemainder[8];
 	int32_t  knobValue[8];
 	uint8_t  wheel;
+
+	bool     stripPitchMode;     // false = Mod (controller 1), true = pitch bend
+	bool     stripTouched;
+	int32_t  stripLastSent;
+	int32_t  stripModLed;        // LED the Mod bar currently reaches
 };
 
 // ---------------------------------------------------------------------------
@@ -183,7 +200,8 @@ static void SetButtonLed(MK3Driver_IVars* ivars, uint32_t button, bool on)
 	if (button >= kButtonBytes * 8) return;
 	const uint8_t address = kButtonLed[button];
 	if (address == 0 || address >= kButtonLedReportBytes) return;
-	const uint8_t value = on ? (IsColourLed(address) ? kColourLedOn : kWhiteLedOn) : RestValue(address);
+	uint8_t value = on ? (IsColourLed(address) ? kColourLedOn : kWhiteLedOn) : RestValue(address);
+	if (button == (ivars->stripPitchMode ? kPitchButton : kModButton)) value = kWhiteLedOn;
 	if (ivars->buttonLeds[address] == value) return;
 	ivars->buttonLeds[address] = value;
 	ivars->buttonLedsDirty = true;
@@ -277,6 +295,79 @@ static void HandlePads(MK3Driver_IVars* ivars, const uint8_t* report, uint32_t l
 // ---------------------------------------------------------------------------
 // Buttons, knobs, wheel (report 0x01)
 
+// Strip LEDs: Mod mode shows a bar up to the current value; Pitch mode shows a dot under
+// the finger and a dim centre mark when released.
+static void ShowStrip(MK3Driver_IVars* ivars)
+{
+	uint8_t next[kStripLedCount] = {};
+	if (ivars->stripPitchMode)
+	{
+		if (ivars->stripTouched && ivars->stripModLed >= 0) next[ivars->stripModLed] = kStripLedOn;
+		else next[kStripLedCount / 2] = kStripLedDim;
+	}
+	else
+	{
+		for (int32_t i = 0; i <= ivars->stripModLed && i < (int32_t)kStripLedCount; i++) next[i] = kStripLedOn;
+	}
+	if (memcmp(ivars->leds + 1, next, kStripLedCount) == 0) return;
+	memcpy(ivars->leds + 1, next, kStripLedCount);
+	ivars->ledsDirty = true;
+	FlushLeds(ivars);
+}
+
+static void SetStripMode(MK3Driver_IVars* ivars, bool pitch)
+{
+	if (ivars->stripPitchMode == pitch) return;
+	ivars->stripPitchMode = pitch;
+	ivars->stripLastSent = -1;
+	ivars->stripModLed = -1;
+	SetButtonLed(ivars, kPitchButton, false);
+	SetButtonLed(ivars, kModButton, false);
+	ShowStrip(ivars);
+}
+
+static void HandleStrip(MK3Driver_IVars* ivars, uint32_t raw)
+{
+	if (raw == 0 || raw >= 8192)
+	{
+		if (!ivars->stripTouched) return;
+		ivars->stripTouched = false;
+		if (ivars->stripPitchMode)
+		{
+			SendMIDI(ivars, 0xE0, 0x00, 0x40);   // back to centre
+			ivars->stripLastSent = -1;
+		}
+		ShowStrip(ivars);
+		return;
+	}
+
+	uint32_t position = raw < kStripMin ? kStripMin : (raw > kStripMax ? kStripMax : raw);
+	position -= kStripMin;
+	const uint32_t span = kStripMax - kStripMin;
+	ivars->stripTouched = true;
+	ivars->stripModLed = (int32_t)(position * (kStripLedCount - 1) / span);
+
+	if (ivars->stripPitchMode)
+	{
+		const int32_t bend = (int32_t)(position * 16383 / span);
+		if (bend != ivars->stripLastSent)
+		{
+			ivars->stripLastSent = bend;
+			SendMIDI(ivars, 0xE0, (uint8_t)(bend & 0x7F), (uint8_t)(bend >> 7));
+		}
+	}
+	else
+	{
+		const int32_t value = (int32_t)(position * 127 / span);
+		if (value != ivars->stripLastSent)
+		{
+			ivars->stripLastSent = value;
+			SendMIDI(ivars, 0xB0, 1, (uint8_t)value);
+		}
+	}
+	ShowStrip(ivars);
+}
+
 static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32_t length)
 {
 	if (length < 28) return;
@@ -306,7 +397,9 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 			const bool down = (now & (1u << bit)) != 0;
 			if (down) SendMIDI(ivars, 0x90 | kButtonChannel, note, 127);
 			else SendMIDI(ivars, 0x80 | kButtonChannel, note, 0);
-			SetButtonLed(ivars, note, down);   // a button lights only while it is held
+			SetButtonLed(ivars, note, down);   // a button brightens while it is held
+			if (down && note == kPitchButton) SetStripMode(ivars, true);
+			if (down && note == kModButton) SetStripMode(ivars, false);
 		}
 		ivars->buttons[byte] = now;
 	}
@@ -344,6 +437,8 @@ static void HandleControls(MK3Driver_IVars* ivars, const uint8_t* report, uint32
 			SendMIDI(ivars, 0xB0, (uint8_t)(kKnobFirstCC + i), (uint8_t)value);
 		}
 	}
+
+	if (length >= 32) HandleStrip(ivars, (uint32_t)(report[30] | (report[31] << 8)));
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +514,8 @@ kern_return_t IMPL(MK3Driver, Start)
 	if (ret != kIOReturnSuccess) { LOG("super Start failed 0x%x", ret); return ret; }
 
 	ivars->logBudget = 20;
+	ivars->stripLastSent = -1;
+	ivars->stripModLed = -1;
 
 	ivars->interface = OSDynamicCast(IOUSBHostInterface, provider);
 	if (ivars->interface == nullptr) { LOG("provider is not a USB interface"); return kIOReturnNoDevice; }
@@ -510,6 +607,7 @@ kern_return_t IMPL(MK3Driver, Start)
 	FlushLeds(ivars);
 	IOSleep(500);
 	for (uint32_t i = 1; i < kButtonLedReportBytes; i++) ivars->buttonLeds[i] = RestValue((uint8_t)i);
+	ivars->buttonLeds[kButtonLed[kModButton]] = kWhiteLedOn;   // the strip starts in Mod mode
 	ivars->buttonLedsDirty = true;
 	ivars->leds[0] = 0x81;
 	for (uint32_t pad = 0; pad < kPadCount; pad++) ivars->leds[kLedPadOffset + pad] = kLedIdle;

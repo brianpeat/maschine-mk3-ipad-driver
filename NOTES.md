@@ -28,9 +28,13 @@ Sent only when something changes. Byte 0 is the report ID.
 
 - Bytes 1-10: one bit per button or touch sensor. Confirmed so far: byte 6 bit 0x20 = Play,
   byte 1 bit 0x40 = Shift, byte 1 bit 0x01 = wheel pushed, byte 9 bit 0x80 = wheel touched,
-  byte 10 bit 0x80 = knob 1 touched. Byte 8 bit 0x01 was seen and is not identified yet.
+  byte 10 bit 0x80 = knob 1 touched, byte 8 bit 0x01 = Channel/MIDI. The full button table is in
+  `Driver/MK3Driver.cpp`.
 - Byte 11: wheel position, a 4-bit counter that steps by one per click.
 - Bytes 12-27: the eight knobs, 16-bit little-endian each, counting 0 to 999 and wrapping.
+- Bytes 30-31: touch strip position, 16-bit little-endian, 0 = not touched, about 60 (left) to
+  960 (right). From MK3Kit; not yet confirmed on this unit.
+- Bytes 36-41: the three small volume knobs (from MK3Kit; not used here).
 
 ## HID output reports
 
