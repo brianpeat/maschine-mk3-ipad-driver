@@ -30,7 +30,7 @@ Press the Mixer button to switch Mixer mode on and off. The driver adds a second
 |---|---|
 | Knobs 1-8 | the eight channel faders of the current bank |
 | Big wheel | the master fader |
-| Screens | channel names and a second line of text sent by the app, with a fader bar per channel and a MAIN bar |
+| Screens | channel names sent by the app, each with its fader position (0-100) and a fader bar, plus a MAIN bar |
 | Play, Stop, Rec | transport, lit to match the app; Restart is rewind |
 | Arrow buttons | bank left and right; with Shift, one channel left and right |
 | Buttons above the screens | select, solo or mute per channel; press Select, Solo or Mute to choose which |
@@ -52,7 +52,7 @@ Lights:
 
 - Confirmed on one MK3 (firmware 1.45) and an M5 iPad Pro on iPadOS 26: pads, knobs, wheel, buttons, touch strip, pad lights, button lights and both screens, with pads and the touch strip playing instruments in Logic Pro for iPad.
 - Mixer mode confirmed with Mixing Station and a Behringer X32: knobs move channel faders, the bank buttons page through layers, and the touch strip moves the main fader through the learned controller. Not yet tried with other apps.
-- New and not yet tested on hardware: the strip lights following the wheel, and the MAIN bar following the main fader position sent back by the app.
+- With that option on, the strip lights follow the wheel, and the MAIN bar follows the main fader when it is moved in the app or on the mixer (set the control's Output Mode in Mixing Station to "On value change").
 - Installing a new build while the Maschine is connected once crashed the iPad's MIDI service (it restarts by itself). Unplug the Maschine before installing.
 - Not handled: the three small volume knobs, level meters, and pad-light colours for anything beyond note on and off.
 - Buttons send notes, so in apps that listen to every MIDI channel they will also trigger sounds.

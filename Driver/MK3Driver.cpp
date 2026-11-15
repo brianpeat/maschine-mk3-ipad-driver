@@ -257,19 +257,29 @@ static void DrawMidiScreens(MK3Driver_IVars* ivars)
 static const int kFaderX = 44, kFaderY = 64, kFaderW = 32, kFaderH = 176;
 static const int kMasterX = 56, kMasterY = 250, kMasterW = 416, kMasterH = 16;   // "MAIN" label sits to its left
 
+// The fader position as a number from 0 to 100, under the channel name. (The app's second
+// line of display text says what a Mackie unit's rotary knobs are assigned to, such as
+// "PAN"; this controller has no such knobs, so that line is not shown.)
+static void DrawMixerLevel(MK3Driver_IVars* ivars, int channel)
+{
+	const int display = channel / 4, x = (channel % 4) * kColumnWidth;
+	char text[12];
+	NumberText((ivars->fader[channel] * 100 + kFaderMax / 2) / kFaderMax, text);
+	CentredText(display, x, 40, text, Screen::RGB(150, 150, 150), 1);
+}
+
 static void DrawMixerText(MK3Driver_IVars* ivars, int channel)
 {
 	const int display = channel / 4, x = (channel % 4) * kColumnWidth;
-	char name[8], second[8];
+	char name[8];
 	for (int i = 0; i < 7; i++)
 	{
-		const char a = ivars->lcd[channel * 7 + i], b = ivars->lcd[56 + channel * 7 + i];
+		const char a = ivars->lcd[channel * 7 + i];
 		name[i] = (a >= 32 && a <= 126) ? a : ' ';
-		second[i] = (b >= 32 && b <= 126) ? b : ' ';
 	}
-	name[7] = 0; second[7] = 0;
+	name[7] = 0;
 	CentredText(display, x, 4, name, Screen::RGB(255, 255, 255), 2);
-	CentredText(display, x, 40, second, Screen::RGB(150, 150, 150), 1);
+	DrawMixerLevel(ivars, channel);
 }
 
 static void DrawMixerFader(MK3Driver_IVars* ivars, int channel)
@@ -278,6 +288,7 @@ static void DrawMixerFader(MK3Driver_IVars* ivars, int channel)
 	const int filled = ivars->fader[channel] * (kFaderH - 4) / kFaderMax;
 	Screen::Fill(display, x + kFaderX + 2, kFaderY + 2, kFaderW - 4, kFaderH - 4 - filled, Screen::RGB(24, 24, 28));
 	Screen::Fill(display, x + kFaderX + 2, kFaderY + kFaderH - 2 - filled, kFaderW - 4, filled, Screen::RGB(0, 200, 90));
+	DrawMixerLevel(ivars, channel);
 }
 
 static void DrawMaster(MK3Driver_IVars* ivars)
@@ -870,7 +881,7 @@ static void HandleMixerSysex(MK3Driver_IVars* ivars)
 	for (uint32_t i = 6; i < n && offset < sizeof(ivars->lcd); i++, offset++)
 	{
 		ivars->lcd[offset] = (char)m[i];
-		touched[(offset % 56) / 7] = true;
+		if (offset < 56) touched[offset / 7] = true;   // only the first row (names) is shown
 	}
 	if (!ivars->mixerMode) return;
 	for (int channel = 0; channel < 8; channel++) if (touched[channel]) DrawMixerText(ivars, channel);
